@@ -47,12 +47,18 @@ if __name__ == "__main__":
                         help='Stopping iteration number', default=1)
     args=parser.parse_args()
     
+    # Loading data from MSLR-WEB10K
     data=Datasets.Datasets()
-    data=Datasets.Datasets()
-    for folder in [1,2,3,4,5]:
-        for fraction in ['train','vali','test']:
+    # use only one folder is enough
+    folder = 1
+    for fraction in ['train','vali','test']:
+        if os.path.exists(Settings.DATA_DIR+'MSLR-WEB10K/Fold'+str(folder)+'/'+fraction+'.npz'):
             data.loadNpz(Settings.DATA_DIR+'MSLR-WEB10K/Fold'+str(folder)+'/'+fraction)
+        else:
+            data.loadTxt(Settings.DATA_DIR+'MSLR-WEB10k/Fold'+str(folder)+'/'+fraction+'.txt', args.dataset)
+            
     anchorURLFeatures, bodyTitleDocFeatures=Settings.get_feature_sets(args.dataset) 
+    
     #No filtering if max_docs is not positive
     if args.max_docs >= 1:
         numpy.random.seed(args.numpy_seed)
