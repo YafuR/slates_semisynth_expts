@@ -1,7 +1,7 @@
 import sys
 
 
-DATA_DIR="../project/"
+DATA_DIR="../Project/"
 
 def get_feature_sets(datasetName):
     anchorURL = [0]
