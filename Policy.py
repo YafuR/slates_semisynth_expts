@@ -274,7 +274,7 @@ class L2RPolicy(Policy):
         if self.modelType == 'gbrt':
             tree=sklearn.ensemble.GradientBoostingRegressor(learning_rate=hyper_params['lr'],
                             n_estimators=hyper_params['ensemble'], subsample=hyper_params['subsample'], max_leaf_nodes=hyper_params['leaves'], 
-                            max_features=1.0, presort=False)
+                            max_features=1.0)
             tree.fit(designMatrix, regressionTargets, sample_weight=sampleWeights)
             self.tree=tree
             print("L2RPolicy:train [INFO] %s" % self.modelType, flush=True)
@@ -390,9 +390,9 @@ class DeterministicPolicy(Policy):
             if self.modelType=='tree':
                 treeCV=sklearn.model_selection.GridSearchCV(sklearn.tree.DecisionTreeRegressor(criterion="mse",
                                                         splitter="random", min_samples_split=4, 
-                                                        min_samples_leaf=4, presort=False),
+                                                        min_samples_leaf=4),
                                 param_grid=self.treeDepths,
-                                scoring=None, fit_params=fitParams, n_jobs=-2,
+                                scoring=None, n_jobs=-2,
                                 iid=True, cv=5, refit=True, verbose=0, pre_dispatch="1*n_jobs",
                                 error_score='raise', return_train_score=False)
                             
@@ -408,7 +408,7 @@ class DeterministicPolicy(Policy):
                                                         max_iter=3000, tol=1e-4, warm_start=False, positive=False,
                                                         random_state=None, selection='random'),
                                 param_grid=self.hyperParams,
-                                scoring=None, fit_params=fitParams, n_jobs=-2,
+                                scoring=None,  n_jobs=-2,
                                 iid=True, cv=5, refit=True, verbose=0, pre_dispatch="1*n_jobs",
                                 error_score='raise', return_train_score=False)
                                 
@@ -423,7 +423,7 @@ class DeterministicPolicy(Policy):
                                                                                     normalize=False, copy_X=False,
                                                                                     max_iter=3000, tol=1e-4, random_state=None),
                                                          param_grid=self.hyperParams,
-                                                         n_jobs=-2, fit_params=fitParams,
+                                                         n_jobs=-2,
                                                          iid=True, cv=3, refit=True, verbose=0, pre_dispatch='1*n_jobs')
                 ridgeCV.fit(allFeatures, allTargets)
                 self.policyParams=ridgeCV.best_estimator_.coef_
@@ -431,7 +431,7 @@ class DeterministicPolicy(Policy):
             elif self.modelType=='gbrt':
                 tree=sklearn.ensemble.GradientBoostingRegressor(learning_rate=self.hyperParams['lr'],
                             n_estimators=self.hyperParams['ensemble'], subsample=self.hyperParams['subsample'], max_leaf_nodes=self.hyperParams['leaves'], 
-                            max_features=1.0, presort=False)
+                            max_features=1.0)
                 tree.fit(allFeatures, allTargets, sample_weight=allSampleWeights)
                 self.tree=tree
                 print("DeterministicPolicy:train [INFO] Done.", flush=True)

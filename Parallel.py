@@ -9,6 +9,8 @@ if __name__ == "__main__":
     import Metrics
     import Estimators
     from sklearn.externals import joblib
+    import warnings
+    warnings.simplefilter("ignore")
     
     parser = argparse.ArgumentParser(description='Synthetic Testbed Experiments.')
     parser.add_argument('--max_docs', '-m', metavar='M', type=int, help='Filter documents',
@@ -24,7 +26,7 @@ if __name__ == "__main__":
     parser.add_argument('--evaluation_ranker', '-e', metavar='E', type=str, help='Model for evaluation ranker', 
                         default="lasso", choices=["tree", "lasso"])
     parser.add_argument('--dataset', '-d', metavar='D', type=str, help='Which dataset to use',
-                        default="MSLR", choices=["MSLR", "MSLR10k", "MQ2008", "MQ2007"])
+                        default="MSLR10k", choices=["MSLR", "MSLR10k", "MQ2008", "MQ2007"])
     parser.add_argument('--value_metric', '-v', metavar='V', type=str, help='Which metric to evaluate',
                         default="NDCG", choices=["NDCG", "ERR", "MaxRel", "SumRel"])
     parser.add_argument('--numpy_seed', '-n', metavar='N', type=int, 
@@ -32,11 +34,11 @@ if __name__ == "__main__":
     parser.add_argument('--output_dir', '-o', metavar='O', type=str, 
                         help='Directory to store pkls', default=Settings.DATA_DIR)
     parser.add_argument('--approach', '-a', metavar='A', type=str, 
-                        help='Approach name', default='IPS', choices=["OnPolicy", "IPS", "IPS_SN", "PI", "PI_SN", "DM_tree", "DM_lasso", "DMc_lasso", "DM_ridge", "DMc_ridge"])
+                        help='Approach name', default='IPS', choices=["OnPolicy", "IPS", "IPS_SN", "PI", "PI_SN", "DM_tree", "DM_lasso", "DMc_lasso", "DM_ridge", "DMc_ridge","Mean","DM_50"])
     parser.add_argument('--logSize', '-s', metavar='S', type=int, 
                         help='Size of log', default=10000000)
     parser.add_argument('--trainingSize', '-z', metavar='Z', type=int, 
-                        help='Size of training data for direct estimators', default=-1)
+                        help='Size of training data for direct estimators', default=30000)
     parser.add_argument('--saveSize', '-u', metavar='U', type=int, 
                         help='Number of saved datapoints', default=10000)
     parser.add_argument('--start', type=int,
@@ -46,27 +48,11 @@ if __name__ == "__main__":
     args=parser.parse_args()
     
     data=Datasets.Datasets()
-    if args.dataset=='MSLR':
-        if os.path.exists(Settings.DATA_DIR+'mslr/mslr.npz'):
-            data.loadNpz(Settings.DATA_DIR+'mslr/mslr')
-        else:
-            data.loadTxt(Settings.DATA_DIR+'mslr/mslr.txt', args.dataset)
-    elif args.dataset=='MSLR10k':
-        if os.path.exists(Settings.DATA_DIR+'MSLR-WEB10k/mslr.npz'):
-            data.loadNpz(Settings.DATA_DIR+'MSLR-WEB10k/mslr')
-        else:
-            data.loadTxt(Settings.DATA_DIR+'MSLR-WEB10k/mslr.txt', args.dataset)
-    elif args.dataset.startswith('MQ200'):
-        if os.path.exists(Settings.DATA_DIR+args.dataset+'.npz'):
-            data.loadNpz(Settings.DATA_DIR+args.dataset)
-        else:
-            data.loadTxt(Settings.DATA_DIR+args.dataset+'.txt', args.dataset)
-    else:
-        print("Parallel:main [ERR] Dataset:%s not supported. Use MQ2008,MQ2007,MSLR,MSLR10k" % args.dataset, flush=True)
-        sys.exit(0)
-        
-    anchorURLFeatures, bodyTitleDocFeatures=Settings.get_feature_sets(args.dataset)
-    
+    data=Datasets.Datasets()
+    for folder in [1,2,3,4,5]:
+        for fraction in ['train','vali','test']:
+            data.loadNpz(Settings.DATA_DIR+'MSLR-WEB10K/Fold'+str(folder)+'/'+fraction)
+    anchorURLFeatures, bodyTitleDocFeatures=Settings.get_feature_sets(args.dataset) 
     #No filtering if max_docs is not positive
     if args.max_docs >= 1:
         numpy.random.seed(args.numpy_seed)
@@ -76,12 +62,14 @@ if __name__ == "__main__":
         detLogger.filterDataset(args.max_docs)
         data=detLogger.dataset
         del detLogger
-        
+
+    print("--------------------------1: Tempory settup --------------------------")           
     #Setup target policy
     numpy.random.seed(args.numpy_seed)
     targetPolicy=Policy.DeterministicPolicy(data, args.evaluation_ranker)
     targetPolicy.train(bodyTitleDocFeatures, 'body')
     targetPolicy.predictAll(args.length_ranking)
+        
     
     loggingPolicy=None
     if args.temperature <= 0.0:
@@ -106,6 +94,7 @@ if __name__ == "__main__":
             smallestProb=currentMin
     print("Parallel:main [LOG] Temperature:", args.temperature, "\t Smallest marginal probability:", smallestProb, flush=True)
     
+    print("-------------------------- Tempory settup --------------------------")
     metric=None
     if args.value_metric=="DCG":
         metric=Metrics.DCG(data, args.length_ranking)
@@ -120,6 +109,7 @@ if __name__ == "__main__":
     else:
         print("Parallel:main [ERR] Metric %s not supported." % args.value_metric, flush=True)
         sys.exit(0)
+        
 
     estimator=None
     if args.approach=="OnPolicy":
@@ -148,6 +138,8 @@ if __name__ == "__main__":
     elif args.approach.startswith("DM"):
         estimatorType=args.approach.split('_',1)[1]
         estimator=Estimators.Direct(args.length_ranking, loggingPolicy, targetPolicy, estimatorType)
+    elif args.approach=="Mean":
+        estimator=Estimators.Mean(args.length_ranking, loggingPolicy, targetPolicy)
     else:
         print("Parallel:main [ERR] Estimator %s not supported." % args.approach, flush=True)
         sys.exit(0)
@@ -163,6 +155,7 @@ if __name__ == "__main__":
     target=trueMetric.mean(dtype=numpy.float64)
     print("Parallel:main [LOG] *** TARGET: ", target, flush = True)
     del trueMetric
+    
     
     saveValues = numpy.linspace(start=int(args.logSize/args.saveSize), stop=args.logSize, num=args.saveSize, endpoint=True, dtype=numpy.int)
     
@@ -243,5 +236,9 @@ if __name__ == "__main__":
         print("")
         print("Parallel:main [LOG] Iter:%d Truth Estimate=%0.5f" % (iteration, target), flush = True)
         print("Parallel:main [LOG] %s Estimate=%0.5f MSE=%0.3e" % (args.approach, savePreds[-1], saveMSEs[-1]), flush=True)
+        
+        print("------------6---------------")
+
    
         joblib.dump((saveValues, saveMSEs, savePreds, target), iterOutputString)
+    

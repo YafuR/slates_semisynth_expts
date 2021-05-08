@@ -1,12 +1,12 @@
 import sys
 
 
-DATA_DIR="D:\\Datasets\\"
+DATA_DIR="../project/"
 
 def get_feature_sets(datasetName):
     anchorURL = [0]
     bodyDoc = [0]
-    
+
     if datasetName.startswith('MSLR'):
         for i in range(25):
             anchorURL.extend([5*i+2, 5*i+4])
@@ -23,6 +23,6 @@ def get_feature_sets(datasetName):
     else:
         print("Settings:get_feature_sets [ERR] Unknown dataset. Use MSLR/MQ200*", flush=True)
         sys.exit(0)
-        
+    
     return anchorURL, bodyDoc
     
