@@ -5,7 +5,8 @@ import sklearn.model_selection
 import sklearn.tree
 import sklearn.ensemble
 import sklearn.linear_model
-from sklearn.externals import joblib
+# from sklearn.externals import joblib
+import joblib
 import os
 import sys
 import Settings
@@ -101,45 +102,7 @@ def NonUniformGamma(num_candidates, decay, ranking_size, allow_repetitions):
 
     gammaInv=scipy.linalg.pinv(gamma)
     return (num_candidates, multinomial, gammaInv)
-    
-
-class RecursiveSlateEval:
-    def __init__(self, scores):
-        self.m=scores.shape[0]
-        self.l=scores.shape[1]
-        self.scores=scores
-        self.sortedIndices=numpy.argsort(scores, axis=0)
-        self.bestSoFar=None
-        self.bestSlate=None
-        self.counter=0
-        self.upperPos=numpy.amax(scores, axis=0)
-        self.eval_slate([], 0.0)
-        print(self.m, self.counter, flush=True)
-        
-    def eval_slate(self, slate_prefix, prefix_value):
-        currentPos=len(slate_prefix)
-        if currentPos==self.l:
-            self.counter+=1
-            if self.bestSoFar is None or prefix_value > self.bestSoFar:
-                self.bestSoFar=prefix_value
-                self.bestSlate=slate_prefix
-            return
-        
-        docSet=set(slate_prefix)
-        bestFutureVal=0.0
-        if currentPos < self.l:
-            bestFutureVal=self.upperPos[currentPos:].sum()
-        delta=prefix_value+bestFutureVal
-        for i in range(self.m):
-            currentDoc=self.sortedIndices[-1-i, currentPos]
-            if currentDoc in docSet:
-                continue
-            currentVal=self.scores[currentDoc, currentPos]
-            if self.bestSoFar is None or ((currentVal+delta) > self.bestSoFar):
-                self.eval_slate(slate_prefix + [currentDoc], prefix_value+currentVal)
-            else:
-                break
-            
+             
 class Policy:
     #dataset: (Datasets) Must be initialized using Datasets.loadTxt(...)/loadNpz(...)
     #allow_repetitions: (bool) If true, the policy predicts rankings with repeated documents
@@ -150,149 +113,7 @@ class Policy:
         ###All sub-classes of Policy should supply a predict method
         ###Requires: (int) query_id; (int) ranking_size.
         ###Returns: list[int],length=min(ranking_size,docsPerQuery[query_id]) ranking
-
-
-class L2RPolicy(Policy):
-    def __init__(self, dataset, ranking_size, model_type, greedy_select, cross_features):
-        Policy.__init__(self, dataset, False)
-        self.rankingSize=ranking_size
-        self.numDocFeatures=dataset.features[0].shape[1]
-        self.modelType=model_type
-        self.crossFeatures=cross_features
-        self.hyperParams=numpy.logspace(0,2,num=5,base=10).tolist()
-        if self.modelType=='tree' or self.modelType=='gbrt':
-            self.tree=None
-        else:
-            self.policyParams=None
-
-        self.greedy=greedy_select
-        
-        self.numFeatures=self.numDocFeatures+self.rankingSize 
-        if self.crossFeatures:
-            self.numFeatures+=self.numDocFeatures*self.rankingSize
-        print("L2RPolicy:init [INFO] Dataset:", dataset.name, flush=True)
-
-    def createFeature(self, docFeatures, position):
-        currFeature=numpy.zeros(self.numFeatures, dtype=numpy.float64)
-        currFeature[0:self.numDocFeatures]=docFeatures
-        currFeature[self.numDocFeatures+position]=1
-        if self.crossFeatures:
-            currFeature[self.numDocFeatures+self.rankingSize+position*self.numDocFeatures: \
-                        self.numDocFeatures+self.rankingSize+(position+1)*self.numDocFeatures]=docFeatures
-
-        return currFeature.reshape(1,-1)
-
-    def predict(self, query_id, ranking_size):
-        allowedDocs=self.dataset.docsPerQuery[query_id]
-        validDocs=min(allowedDocs, self.rankingSize)
-
-        allScores=numpy.zeros((allowedDocs, validDocs), dtype=numpy.float64)
-        allFeatures=self.dataset.features[query_id].toarray()
-        
-        for doc in range(allowedDocs):
-            docID=doc
-            if self.dataset.mask is not None:
-                docID=self.dataset.mask[query_id][doc]
-            for pos in range(validDocs):
-                currFeature=self.createFeature(allFeatures[docID,:], pos)
-
-                if self.modelType=='tree' or self.modelType=='gbrt':
-                    allScores[doc, pos]=self.tree.predict(currFeature)
-                else:
-                    allScores[doc, pos]=currFeature.dot(self.policyParams)
-
-        tieBreaker=1e-14*numpy.random.random((allowedDocs, validDocs))
-        allScores+=tieBreaker
-        upperBound=numpy.amax(allScores, axis=0)
-        
-        producedRanking=None
-        if self.greedy:
-            
-            producedRanking=numpy.empty(validDocs, dtype=numpy.int32)
-            currentVal=0.0
-            for i in range(validDocs):
-                maxIndex=numpy.argmax(allScores)
-                chosenDoc,chosenPos = numpy.unravel_index(maxIndex, allScores.shape)
-                currentVal+=allScores[chosenDoc, chosenPos]
-                if self.dataset.mask is None:
-                    producedRanking[chosenPos]=chosenDoc
-                else:
-                    producedRanking[chosenPos]=self.dataset.mask[query_id][chosenDoc]
-                
-                allScores[chosenDoc,:] = float('-inf')
-                allScores[:,chosenPos] = float('-inf')
-            
-            self.debug=upperBound.sum()-currentVal
-        else:
-            slateScorer=RecursiveSlateEval(allScores)
-            if self.dataset.mask is None:
-                producedRanking=numpy.array(slateScorer.bestSlate)
-            else:
-                producedRanking=self.dataset.mask[slateScorer.bestSlate]
-                
-            self.debug=upperBound.sum()-slateScorer.bestSoFar
-            del slateScorer
-            
-        del allFeatures
-        del allScores
-        
-        return producedRanking
-
-    def train(self, dataset, targets, hyper_params):
-        numQueries=len(dataset.docsPerQuery)
-        validDocs=numpy.minimum(dataset.docsPerQuery, self.rankingSize)
-        queryDocPosTriplets=numpy.dot(dataset.docsPerQuery, validDocs)
-        designMatrix=numpy.zeros((queryDocPosTriplets, self.numFeatures), dtype=numpy.float32, order='F')
-        regressionTargets=numpy.zeros(queryDocPosTriplets, dtype=numpy.float64, order='C')
-        sampleWeights=numpy.zeros(queryDocPosTriplets, dtype=numpy.float32)
-        currID=-1
-        for i in range(numQueries):
-            numAllowedDocs=dataset.docsPerQuery[i]
-            currValidDocs=validDocs[i]
-            allFeatures=dataset.features[i].toarray()
-            
-            for doc in range(numAllowedDocs):
-                docID=doc
-                if dataset.mask is not None:
-                    docID=dataset.mask[i][doc]
-                    
-                for j in range(currValidDocs):
-                    currID+=1
-
-                    designMatrix[currID,:]=self.createFeature(allFeatures[docID,:], j)
-                    regressionTargets[currID]=targets[i][j,doc] 
-                    sampleWeights[currID]=1.0/(numAllowedDocs * currValidDocs)
-        
-        for i in targets:
-            del i
-        del targets
-        
-        print("L2RPolicy:train [LOG] Finished creating features and targets ", 
-                numpy.amin(regressionTargets), numpy.amax(regressionTargets), numpy.median(regressionTargets), flush=True)
-        print("L2RPolicy:train [LOG] Histogram of targets ", numpy.histogram(regressionTargets), flush=True)
-        
-        if self.modelType == 'gbrt':
-            tree=sklearn.ensemble.GradientBoostingRegressor(learning_rate=hyper_params['lr'],
-                            n_estimators=hyper_params['ensemble'], subsample=hyper_params['subsample'], max_leaf_nodes=hyper_params['leaves'], 
-                            max_features=1.0)
-            tree.fit(designMatrix, regressionTargets, sample_weight=sampleWeights)
-            self.tree=tree
-            print("L2RPolicy:train [INFO] %s" % self.modelType, flush=True)
-                
-        elif self.modelType == 'ridge':
-            ridgeCV=sklearn.linear_model.RidgeCV(alphas=self.hyperParams, fit_intercept=False,
-                                                            normalize=False, cv=3)
-            ridgeCV.fit(designMatrix, regressionTargets, sample_weight=sampleWeights)
-            self.policyParams=ridgeCV.coef_
-            print("L2RPolicy:train [INFO] Done. ", flush=True)
-            
-        else:
-            print("L2RPolicy:train [ERR] %s not supported." % self.modelType, flush = True)
-            sys.exit(0)
-            
-        print("L2R:train [INFO] Created %s predictor using dataset %s." %
-                (self.modelType, dataset.name), flush = True)
-                
+           
                 
 class DeterministicPolicy(Policy):
     #model_type: (str) Model class to use for scoring documents
@@ -388,18 +209,28 @@ class DeterministicPolicy(Policy):
         
             print("DeterministicPolicy:train [INFO] Beginning training", self.modelType, flush=True)
             if self.modelType=='tree':
+#                 treeCV=sklearn.model_selection.GridSearchCV(sklearn.tree.DecisionTreeRegressor(criterion="mse",
+#                                                         splitter="random", min_samples_split=4, 
+#                                                         min_samples_leaf=4),
+#                                 param_grid=self.treeDepths,
+#                                 scoring=None, n_jobs=-2,
+#                                 iid=True, cv=5, refit=True, verbose=0, pre_dispatch="1*n_jobs",
+#                                 error_score='raise', return_train_score=False)
+                            
+                    
+                # presort; fit_params; iid deprecated
                 treeCV=sklearn.model_selection.GridSearchCV(sklearn.tree.DecisionTreeRegressor(criterion="mse",
                                                         splitter="random", min_samples_split=4, 
                                                         min_samples_leaf=4),
                                 param_grid=self.treeDepths,
-                                scoring=None, n_jobs=-2,
-                                iid=True, cv=5, refit=True, verbose=0, pre_dispatch="1*n_jobs",
+                                scoring=None, n_jobs=-2, cv=5, refit=True, verbose=0, pre_dispatch="1*n_jobs",
                                 error_score='raise', return_train_score=False)
-                            
+
                 treeCV.fit(allFeatures, allTargets)
                 self.tree=treeCV.best_estimator_
                 print("DeterministicPolicy:train [INFO] Done. Best depth", 
                             treeCV.best_params_['max_depth'], flush=True)
+                
                 joblib.dump(self.tree, modelFile, compress=9, protocol=-1)
             
             elif self.modelType=='lasso':
