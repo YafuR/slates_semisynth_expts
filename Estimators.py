@@ -104,7 +104,37 @@ class UniformIPS(Estimator):
         return self.runningMean
 
 
-class NonUniformIPS(Estimator):
+class NonUniformIPS_s(Estimator):
+    def __init__(self, ranking_size, logging_policy, target_policy):
+        Estimator.__init__(self, ranking_size, logging_policy, target_policy)
+        self.name = 'NonUnif-IPS'
+
+    def estimate(self, query, logged_ranking, new_ranking, logged_value):
+        exactMatch = numpy.absolute(new_ranking - logged_ranking).sum() == 0
+        currentValue = 0.0
+        if True:
+            numAllowedDocs = self.loggingPolicy.dataset.docsPerQuery[query]
+            underlyingRanking = self.loggingPolicy.policy.predict(query, -1)
+            underlyingRanking_t = self.targetPolicy.policy.predict(query, -1)
+            currentDistribution = self.loggingPolicy.multinomials[numAllowedDocs]
+
+            targetDistribution = self.targetPolicy.multinomials[numAllowedDocs]
+
+            numRankedDocs = logged_ranking.size
+            invPropensity = 1.0
+
+            for j in range(numRankedDocs):
+                underlyingIndex = numpy.flatnonzero(underlyingRanking == logged_ranking[j])[0]
+                underlyingIndex_t = numpy.flatnonzero(underlyingRanking_t == new_ranking[j])[0]
+                invPropensity *= (targetDistribution[underlyingIndex_t] * 1.0 / currentDistribution[underlyingIndex])
+
+            currentValue = logged_value * invPropensity
+
+        self.updateRunningAverage(currentValue)
+        return self.runningMean
+
+
+class NonUniformIPS_d(Estimator):
     def __init__(self, ranking_size, logging_policy, target_policy):
         Estimator.__init__(self, ranking_size, logging_policy, target_policy)
         self.name='NonUnif-IPS'
@@ -359,15 +389,15 @@ class Direct(Estimator):
         Estimator.__init__(self, ranking_size, logging_policy, target_policy)
         self.name = 'Direct_'+estimator_type
         self.estimatorType = estimator_type
-        if estimator_type=="50":
-            self.numFeatures=50
-        else:
-            self.numFeatures=self.loggingPolicy.dataset.features[0].shape[1]
+        self.numFeatures=self.loggingPolicy.dataset.features[0].shape[1]
         self.hyperParams={'alpha': (numpy.logspace(-2,1,num=4,base=10)).tolist()}
         self.treeDepths={'max_depth': list(range(3,15,3))}
         
         if self.estimatorType=='tree':
             self.tree=None
+        elif self.estimatorType=='rf':
+            self.rf=None
+
         else:
             self.policyParams=None
             
@@ -382,10 +412,7 @@ class Direct(Estimator):
         numQueries=len(self.loggingPolicy.dataset.docsPerQuery)
         for query in range(numQueries):
             newRanking=self.targetPolicy.predict(query, self.rankingSize)
-            if self.estimatorType=="50":
-                allFeatures=self.loggingPolicy.dataset.features[query][newRanking,:50]
-            else:
-                allFeatures=self.loggingPolicy.dataset.features[query][newRanking,:]
+            allFeatures=self.loggingPolicy.dataset.features[query][newRanking,:]
         
             if newRanking.size < self.rankingSize:
                 emptyPad=scipy.sparse.csr_matrix((self.rankingSize-newRanking.size, self.numFeatures), dtype=numpy.float64)
@@ -399,6 +426,9 @@ class Direct(Estimator):
             currentValue=None
             if self.estimatorType=='tree':
                 currentValue=self.tree.predict(currentFeatures)[0]
+            elif self.estimatorType=='rf':
+                currentValue=self.rf.predict(currentFeatures)[0]
+		
             else:
                 currentValue=numpy.dot(currentFeatures, self.policyParams)[0]
             
@@ -430,19 +460,15 @@ class Direct(Estimator):
     def train(self, logged_data):
         numInstances=len(logged_data)
         targets=numpy.zeros(numInstances, order='C', dtype=numpy.float64)
-        covariates=scipy.sparse.lil_matrix((numInstances, self.numFeatures*self.rankingSize), dtype=numpy.float64)
+        covariates=scipy.sparse.lil_matrix((numInstances, self.numFeatures*self.rankingSize))
         print("Starting to create covariates", flush=True)
         for j in range(numInstances):
             currentDatapoint=logged_data.pop()
-            # currentDatapoint: (currentQuery, loggedRanking, loggedValue)
             targets[j]=currentDatapoint[2]
             
             currentQuery=currentDatapoint[0]
             currentRanking=currentDatapoint[1]
-            if self.estimatorType=="50":
-                allFeatures=self.loggingPolicy.dataset.features[currentQuery][currentRanking,:50]
-            else:
-                allFeatures=self.loggingPolicy.dataset.features[currentQuery][currentRanking,:]
+            allFeatures=self.loggingPolicy.dataset.features[currentQuery][currentRanking,:]
             allFeatures.eliminate_zeros()
             
             covariates.data[j]=allFeatures.data
@@ -468,31 +494,43 @@ class Direct(Estimator):
                                                         min_samples_leaf=4),
                                 param_grid=self.treeDepths,
                                 scoring=None, n_jobs=1,
-                                 cv=3, refit=True, verbose=0, pre_dispatch=1,
+                                cv=3, refit=True, verbose=0, pre_dispatch=1,
                                 error_score='raise', return_train_score=False)
             treeCV.fit(covariates, targets)
             self.tree=treeCV.best_estimator_
             print("DirectEstimator:train [INFO] Done. Best depth", 
                             treeCV.best_params_['max_depth'], flush=True)
+        elif self.estimatorType=='rf':
+            rfCV=sklearn.model_selection.GridSearchCV(sklearn.ensemble.RandomForestRegressor(criterion="mse",max_depth=4),
+                                                      param_grid=self.treeDepths,
+                                                      scoring=None, n_jobs=1,
+                                                      cv=3, refit=True, verbose=0, pre_dispatch=1,
+                                                      error_score='raise', return_train_score=False
+                                                      )
+            rfCV.fit(covariates, targets)
+            self.rf=rfCV.best_estimator_
+            print("DirectEstimator:train [INFO] Done. Best depth", 
+                            rfCV.best_params_['max_depth'], flush=True)
+
         elif self.estimatorType=='lasso':
             lassoCV=sklearn.model_selection.GridSearchCV(sklearn.linear_model.Lasso(fit_intercept=False, 
                                                         normalize=False, precompute=False, copy_X=False, 
                                                         max_iter=30000, tol=1e-4, warm_start=False, positive=False,
                                                         random_state=None, selection='random'),
                                 param_grid=self.hyperParams,
-                                scoring=None, n_jobs=1,
-                                cv=3, refit=True, verbose=0, pre_dispatch=1,
+                                scoring=None, fit_params=None, n_jobs=1,
+                                iid=True, cv=3, refit=True, verbose=0, pre_dispatch=1,
                                 error_score='raise', return_train_score=False)
             lassoCV.fit(covariates, targets)
             self.policyParams=lassoCV.best_estimator_.coef_
             print("DirectEstimator:train [INFO] Done. CVAlpha", lassoCV.best_params_['alpha'], flush=True)
-        elif self.estimatorType=='ridge' or self.estimatorType=='50':
+        elif self.estimatorType=='ridge':
             ridgeCV=sklearn.model_selection.GridSearchCV(sklearn.linear_model.Ridge(fit_intercept=False,
                                                         normalize=False, copy_X=False, max_iter=30000, tol=1e-4, solver='sag',
                                                         random_state=None),
                                 param_grid=self.hyperParams,
-                                scoring=None, n_jobs=1,
-                                cv=3, refit=True, verbose=0, pre_dispatch=1,
+                                scoring=None, fit_params=None, n_jobs=1,
+                                iid=True, cv=3, refit=True, verbose=0, pre_dispatch=1,
                                 error_score='raise', return_train_score=False)
             ridgeCV.fit(covariates, targets)
             self.policyParams=ridgeCV.best_estimator_.coef_
@@ -503,14 +541,10 @@ class Direct(Estimator):
         
     def estimate(self, query, logged_ranking, new_ranking, logged_value):
         currentValue=None
-    
         if self.savedValues is not None:
             currentValue=self.savedValues[query]
         else:
-            if self.estimatorType=="50":
-                allFeatures=self.loggingPolicy.dataset.features[query][new_ranking,:50]
-            else:
-                allFeatures=self.loggingPolicy.dataset.features[query][new_ranking,:]
+            allFeatures=self.loggingPolicy.dataset.features[query][new_ranking,:]
         
             if new_ranking.size < self.rankingSize:
                 emptyPad=scipy.sparse.csr_matrix((self.rankingSize-new_ranking.size, self.numFeatures), dtype=numpy.float64)
@@ -523,6 +557,11 @@ class Direct(Estimator):
 
             if self.estimatorType=='tree':
                 currentValue=self.tree.predict(currentFeatures)[0]
+
+            elif self.estimatorType=='rf':
+                currentValue=self.rf.predict(currentFeatures)[0]
+
+
             else:
                 currentValue=numpy.dot(currentFeatures, self.policyParams)[0]
         
@@ -537,15 +576,8 @@ class Direct(Estimator):
         self.savedValues=None
         if self.estimatorType=='tree':
             self.tree=None
+        elif self.estimatorType=='rf':
+            self.rf=None
+
         else:
             self.policyParams=None
-
-
-class Mean(Estimator):
-    def __init__(self, ranking_size, logging_policy, target_policy):
-        Estimator.__init__(self, ranking_size, logging_policy, target_policy)
-        self.name='Mean'
-        
-    def estimate(self, query, logged_ranking, new_ranking, logged_value):
-        self.updateRunningAverage(logged_value)
-        return self.runningMean
