@@ -467,8 +467,8 @@ class Direct(Estimator):
                                                         splitter="random", min_samples_split=4, 
                                                         min_samples_leaf=4),
                                 param_grid=self.treeDepths,
-                                scoring=None, fit_params=None, n_jobs=1,
-                                iid=True, cv=3, refit=True, verbose=0, pre_dispatch=1,
+                                scoring=None, n_jobs=1,
+                                 cv=3, refit=True, verbose=0, pre_dispatch=1,
                                 error_score='raise', return_train_score=False)
             treeCV.fit(covariates, targets)
             self.tree=treeCV.best_estimator_
@@ -480,8 +480,8 @@ class Direct(Estimator):
                                                         max_iter=30000, tol=1e-4, warm_start=False, positive=False,
                                                         random_state=None, selection='random'),
                                 param_grid=self.hyperParams,
-                                scoring=None, fit_params=None, n_jobs=1,
-                                iid=True, cv=3, refit=True, verbose=0, pre_dispatch=1,
+                                scoring=None, n_jobs=1,
+                                cv=3, refit=True, verbose=0, pre_dispatch=1,
                                 error_score='raise', return_train_score=False)
             lassoCV.fit(covariates, targets)
             self.policyParams=lassoCV.best_estimator_.coef_
@@ -492,7 +492,7 @@ class Direct(Estimator):
                                                         random_state=None),
                                 param_grid=self.hyperParams,
                                 scoring=None, n_jobs=1,
-                                iid=True, cv=3, refit=True, verbose=0, pre_dispatch=1,
+                                cv=3, refit=True, verbose=0, pre_dispatch=1,
                                 error_score='raise', return_train_score=False)
             ridgeCV.fit(covariates, targets)
             self.policyParams=ridgeCV.best_estimator_.coef_

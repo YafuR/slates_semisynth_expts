@@ -75,7 +75,7 @@ if __name__ == "__main__":
     # all feature would be combination of both list
     allFeatures = anchorURLFeatures + bodyTitleDocFeatures
     
-    #No filtering if max_docs is not positive
+    # No filtering if max_docs is not positive
     if args.max_docs >= 1:
         numpy.random.seed(args.numpy_seed)
         detLogger=Policy.DeterministicPolicy(data, 'tree')

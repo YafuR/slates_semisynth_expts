@@ -181,6 +181,8 @@ class DeterministicPolicy(Policy):
                     self.policyParams=npFile['policyParams']
                 print("DeterministicPolicy:train [INFO] Using precomputed policy", modelFile, flush=True)
                 print("DeterministicPolicy:train [INFO] PolicyParams", self.policyParams,flush=True)
+        else:
+            rerun_model = True
                 
         if rerun_model:
             numQueries=len(self.dataset.features)
@@ -394,12 +396,19 @@ class UniformPolicy(Policy):
             return
         
         gammaFile=Settings.DATA_DIR+self.dataset.name+'_'+self.name+'_'+str(ranking_size)+'.z'
+        rerun = False
         if os.path.exists(gammaFile):
-            self.gammas=joblib.load(gammaFile)
-            self.gammaRankingSize=ranking_size
-            print("UniformPolicy:setupGamma [INFO] Using precomputed gamma", gammaFile, flush=True)
-            
+            try: 
+                self.gammas=joblib.load(gammaFile)
+                self.gammaRankingSize=ranking_size
+                print("UniformPolicy:setupGamma [INFO] Using precomputed gamma", gammaFile, flush=True)
+            except:
+                rerun = True
         else:
+            rerun = True
+                
+            
+        if rerun:
             self.gammas={}
             self.gammaRankingSize=ranking_size
             
@@ -462,12 +471,18 @@ class NonUniformPolicy(Policy):
             return
         
         gammaFile=Settings.DATA_DIR+self.dataset.name+'_'+self.name+'_'+str(ranking_size)+'.z'
+        rerun = False
         if os.path.exists(gammaFile):
-            self.gammas, self.multinomials=joblib.load(gammaFile)
-            self.gammaRankingSize=ranking_size
-            print("NonUniformPolicy:setupGamma [INFO] Using precomputed gamma", gammaFile, flush=True)
-            
+            try:
+                self.gammas, self.multinomials=joblib.load(gammaFile)
+                self.gammaRankingSize=ranking_size
+                print("NonUniformPolicy:setupGamma [INFO] Using precomputed gamma", gammaFile, flush=True)
+            except:
+                rerun = True
         else:
+            rerun = True
+            
+        if rerun:
             self.gammas={}
             self.multinomials={}
             self.gammaRankingSize=ranking_size
