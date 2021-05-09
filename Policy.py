@@ -117,7 +117,10 @@ class Policy:
                 
 class DeterministicPolicy(Policy):
     #model_type: (str) Model class to use for scoring documents
-    def __init__(self, dataset, model_type, regress_gains=False, weighted_ls=False, hyper_params=None):
+    def __init__(self, dataset, model_type, regress_gains=False, weighted_ls=False, hyper_params=None, anti=False):
+        """
+        anti = True, means the policy would learn to predict relevance and return the least relevance documents
+        """
         Policy.__init__(self, dataset, False)
         self.modelType=model_type
         self.hyperParams={'alpha': (numpy.logspace(-3,2,num=6,base=10)).tolist()}
@@ -126,6 +129,7 @@ class DeterministicPolicy(Policy):
         
         self.regressGains=regress_gains
         self.weighted=weighted_ls
+        self.anti=anti
         
         self.treeDepths={'max_depth': list(range(3,21,3))}
         
@@ -161,16 +165,24 @@ class DeterministicPolicy(Policy):
         self.savedRankingsSize=None
         self.savedRankings=None
         
+        # adjust to for in case tree cannot be load
+        rerun_model = False
         if os.path.exists(modelFile):
             if self.modelType=='tree' or self.modelType=='gbrt':
-                self.tree=joblib.load(modelFile)
-                print("DeterministicPolicy:train [INFO] Using precomputed policy", modelFile, flush=True)
+                try:
+                    self.tree=joblib.load(modelFile)
+                    print("DeterministicPolicy:train [INFO] Using precomputed policy", modelFile, flush=True)
+                except:
+                    print("Policy file found, but cannot be loaded.")
+                    rerun_model = True
+                    
             else:
                 with numpy.load(modelFile) as npFile:
                     self.policyParams=npFile['policyParams']
                 print("DeterministicPolicy:train [INFO] Using precomputed policy", modelFile, flush=True)
                 print("DeterministicPolicy:train [INFO] PolicyParams", self.policyParams,flush=True)
-        else:
+                
+        if rerun_model:
             numQueries=len(self.dataset.features)
         
             allFeatures=None
@@ -305,7 +317,12 @@ class DeterministicPolicy(Policy):
             allDocScores=currentFeatures.dot(self.policyParams)
             
         tieBreaker=numpy.random.random(allDocScores.size)
-        sortedDocScores=numpy.lexsort((tieBreaker,-allDocScores))[0:validDocs]
+        if self.anti:
+            # predict the least optimal ranking
+            sortedDocScores=numpy.lexsort((tieBreaker,-allDocScores))[::-1][0:validDocs]
+        else:
+            sortedDocScores=numpy.lexsort((tieBreaker,-allDocScores))[0:validDocs]
+            
         if self.dataset.mask is None:
             return sortedDocScores
         else:
