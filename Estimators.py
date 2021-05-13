@@ -82,6 +82,11 @@ class OnPolicy(Estimator):
         
         
 class UniformIPS(Estimator):
+    """
+    IPS for 
+    uniform logging policy
+    deterministic target policy
+    """
     def __init__(self, ranking_size, logging_policy, target_policy):
         Estimator.__init__(self, ranking_size, logging_policy, target_policy)
         self.name='Unif-IPS'
@@ -105,6 +110,11 @@ class UniformIPS(Estimator):
 
 
 class NonUniformIPS(Estimator):
+    """
+    IPS for 
+    nonuniform (stochastic) logging policy
+    deterministic target policy
+    """
     def __init__(self, ranking_size, logging_policy, target_policy):
         Estimator.__init__(self, ranking_size, logging_policy, target_policy)
         self.name='NonUnif-IPS'
@@ -131,7 +141,125 @@ class NonUniformIPS(Estimator):
         self.updateRunningAverage(currentValue)
         return self.runningMean
 
+class UniformIPS_tUniform(Estimator):
+    """
+    IPS for 
+    uniform logging policy
+    uniform target policy
+    """
+    def __init__(self, ranking_size, logging_policy, target_policy):
+        Estimator.__init__(self, ranking_size, logging_policy, target_policy)
+        self.name='Unif-IPS-t-Unif'
         
+    def estimate(self, query, logged_ranking, new_ranking, logged_value):
+        numAllowedDocs=self.loggingPolicy.dataset.docsPerQuery[query]
+        validDocs=logged_ranking.size
+        invPropensity=None
+        if self.loggingPolicy.allowRepetitions:
+            pass
+            # invPropensity=numpy.float_power(numAllowedDocs, validDocs)
+        else:
+            invPropensity=1
+
+        currentValue=logged_value*invPropensity
+
+        self.updateRunningAverage(currentValue)
+        return self.runningMean
+
+
+class NonUniformIPS_tUniform(Estimator):
+    """
+    IPS for 
+    nonuniform (stochastic) logging policy
+    uniform target policy
+    """
+    def __init__(self, ranking_size, logging_policy, target_policy):
+        Estimator.__init__(self, ranking_size, logging_policy, target_policy)
+        self.name='NonUnif-IPS-t-Unif'
+        
+    def estimate(self, query, logged_ranking, new_ranking, logged_value):
+        numAllowedDocs=self.loggingPolicy.dataset.docsPerQuery[query]
+        validDocs=logged_ranking.size
+        underlyingRanking=self.loggingPolicy.policy.predict(query, -1)
+        currentDistribution=self.loggingPolicy.multinomials[numAllowedDocs]
+
+        numRankedDocs=logged_ranking.size
+        invPropensity=1.0
+        # uniform target policy
+        denominator= 1/ numpy.prod(range(numAllowedDocs+1-validDocs, numAllowedDocs+1), dtype=numpy.float64)
+        
+        for j in range(numRankedDocs):
+            underlyingIndex=numpy.flatnonzero(underlyingRanking == logged_ranking[j])[0]
+            invPropensity*=(denominator*1.0/currentDistribution[underlyingIndex])
+            if not self.loggingPolicy.allowRepetitions:
+                denominator-=currentDistribution[underlyingIndex]
+
+        currentValue=logged_value*invPropensity
+
+        self.updateRunningAverage(currentValue)
+        return self.runningMean
+    
+class UniformIPS_tNonUniform(Estimator):
+    """
+    IPS for 
+    uniform logging policy
+    nonuniform (stochastic) target policy
+    """
+    def __init__(self, ranking_size, logging_policy, target_policy):
+        Estimator.__init__(self, ranking_size, logging_policy, target_policy)
+        self.name = 'NonUnif-IPS-t-NonUnif'
+
+    def estimate(self, query, logged_ranking, new_ranking, logged_value):
+        numAllowedDocs = self.loggingPolicy.dataset.docsPerQuery[query]
+     
+        underlyingRanking_t = self.targetPolicy.policy.predict(query, -1)
+        targetDistribution = self.targetPolicy.multinomials[numAllowedDocs]
+
+        numRankedDocs = logged_ranking.size
+        invPropensity = 1.0
+
+        for j in range(numRankedDocs):
+            underlyingIndex_t = numpy.flatnonzero(underlyingRanking_t == new_ranking[j])[0]
+            invPropensity *= targetDistribution[underlyingIndex_t] * numpy.prod(range(numAllowedDocs+1-validDocs, numAllowedDocs+1), dtype=numpy.float64)
+
+        currentValue = logged_value * invPropensity
+
+        self.updateRunningAverage(currentValue)
+        return self.runningMean
+        
+class NonUniformIPS_tNonUniform(Estimator):
+    """
+    IPS for 
+    nonuniform (stochastic) logging policy
+    nonuniform (stochastic) target policy
+    """
+    def __init__(self, ranking_size, logging_policy, target_policy):
+        Estimator.__init__(self, ranking_size, logging_policy, target_policy)
+        self.name = 'NonUnif-IPS-t-NonUnif'
+
+    def estimate(self, query, logged_ranking, new_ranking, logged_value):
+        numAllowedDocs = self.loggingPolicy.dataset.docsPerQuery[query]
+        
+        underlyingRanking = self.loggingPolicy.policy.predict(query, -1)
+        underlyingRanking_t = self.targetPolicy.policy.predict(query, -1)
+        currentDistribution = self.loggingPolicy.multinomials[numAllowedDocs]
+        targetDistribution = self.targetPolicy.multinomials[numAllowedDocs]
+
+        numRankedDocs = logged_ranking.size
+        invPropensity = 1.0
+
+        for j in range(numRankedDocs):
+            underlyingIndex = numpy.flatnonzero(underlyingRanking == logged_ranking[j])[0]
+            underlyingIndex_t = numpy.flatnonzero(underlyingRanking_t == new_ranking[j])[0]
+            invPropensity *= (targetDistribution[underlyingIndex_t] * 1.0 / currentDistribution[underlyingIndex])
+
+        currentValue = logged_value * invPropensity
+
+        self.updateRunningAverage(currentValue)
+        return self.runningMean
+    
+    
+## Self_normalized part
 class UniformSNIPS(Estimator):
     def __init__(self, ranking_size, logging_policy, target_policy):
         Estimator.__init__(self, ranking_size, logging_policy, target_policy)
@@ -201,7 +329,154 @@ class NonUniformSNIPS(Estimator):
     def reset(self):
         Estimator.reset(self)
         self.runningDenominatorMean=0.0
+        
+class UniformSNIPS_tUniform(Estimator):
+    def __init__(self, ranking_size, logging_policy, target_policy):
+        Estimator.__init__(self, ranking_size, logging_policy, target_policy)
+        self.name='Unif-IPS_SN-t-Unif'
+        self.runningDenominatorMean=0.0
+        
+    def estimate(self, query, logged_ranking, new_ranking, logged_value):
+        numAllowedDocs=self.loggingPolicy.dataset.docsPerQuery[query]
+        validDocs=logged_ranking.size
+        invPropensity=None
+        if self.loggingPolicy.allowRepetitions:
+            pass
+            # invPropensity=numpy.float_power(numAllowedDocs, validDocs)
+        else:
+            invPropensity=1
 
+        currentValue=logged_value*invPropensity
+        
+        self.updateRunningAverage(currentValue)
+        denominatorDelta=invPropensity-self.runningDenominatorMean
+        self.runningDenominatorMean+=denominatorDelta/self.runningSum
+        if self.runningDenominatorMean!=0.0:
+            return 1.0*self.runningMean/self.runningDenominatorMean
+        else:
+            return 0.0
+
+        def reset(self):
+            Estimator.reset(self)
+            self.runningDenominatorMean=0.0
+
+
+class NonUniformSNIPS_tUniform(Estimator):
+    def __init__(self, ranking_size, logging_policy, target_policy):
+        Estimator.__init__(self, ranking_size, logging_policy, target_policy)
+        self.name='NonUnif-IPS_SN-t-Unif'
+        self.runningDenominatorMean=0.0
+        
+    def estimate(self, query, logged_ranking, new_ranking, logged_value):
+        numAllowedDocs=self.loggingPolicy.dataset.docsPerQuery[query]
+        validDocs=logged_ranking.size
+        underlyingRanking=self.loggingPolicy.policy.predict(query, -1)
+        currentDistribution=self.loggingPolicy.multinomials[numAllowedDocs]
+
+        numRankedDocs=logged_ranking.size
+        invPropensity=1.0
+        # uniform target policy
+        denominator= 1/ numpy.prod(range(numAllowedDocs+1-validDocs, numAllowedDocs+1), dtype=numpy.float64)
+        
+        for j in range(numRankedDocs):
+            underlyingIndex=numpy.flatnonzero(underlyingRanking == logged_ranking[j])[0]
+            invPropensity*=(denominator*1.0/currentDistribution[underlyingIndex])
+            if not self.loggingPolicy.allowRepetitions:
+                denominator-=currentDistribution[underlyingIndex]
+
+        currentValue=logged_value*invPropensity
+
+        self.updateRunningAverage(currentValue)
+        denominatorDelta=invPropensity-self.runningDenominatorMean
+        self.runningDenominatorMean+=denominatorDelta/self.runningSum
+        if self.runningDenominatorMean!=0.0:
+            return 1.0*self.runningMean/self.runningDenominatorMean
+        else:
+            return 0.0
+
+        def reset(self):
+            Estimator.reset(self)
+            self.runningDenominatorMean=0.0
+
+class UniformSNIPS_tNonUniform(Estimator):
+    """
+    SNIPS for 
+    uniform logging policy
+    nonuniform (stochastic) target policy
+    """
+    def __init__(self, ranking_size, logging_policy, target_policy):
+        Estimator.__init__(self, ranking_size, logging_policy, target_policy)
+        self.name = 'NonUnif-IPS_SN-t-NonUnif'
+        self.runningDenominatorMean=0.0
+
+    def estimate(self, query, logged_ranking, new_ranking, logged_value):
+        numAllowedDocs = self.loggingPolicy.dataset.docsPerQuery[query]
+        validDocs=logged_ranking.size
+     
+        underlyingRanking_t = self.targetPolicy.policy.predict(query, -1)
+        targetDistribution = self.targetPolicy.multinomials[numAllowedDocs]
+
+        numRankedDocs = logged_ranking.size
+        invPropensity = 1.0
+
+        for j in range(numRankedDocs):
+            underlyingIndex_t = numpy.flatnonzero(underlyingRanking_t == new_ranking[j])[0]
+            invPropensity *= targetDistribution[underlyingIndex_t] * numpy.prod(range(numAllowedDocs+1-validDocs, numAllowedDocs+1), dtype=numpy.float64)
+
+        currentValue = logged_value * invPropensity
+
+        self.updateRunningAverage(currentValue)
+        denominatorDelta=invPropensity-self.runningDenominatorMean
+        self.runningDenominatorMean+=denominatorDelta/self.runningSum
+        if self.runningDenominatorMean!=0.0:
+            return 1.0*self.runningMean/self.runningDenominatorMean
+        else:
+            return 0.0
+
+    def reset(self):
+        Estimator.reset(self)
+        self.runningDenominatorMean=0.0
+        
+class NonUniformSNIPS_tNonUniform(Estimator):
+    """
+    SNIPS for 
+    nonuniform (stochastic) logging policy
+    nonuniform (stochastic) target policy
+    """
+    def __init__(self, ranking_size, logging_policy, target_policy):
+        Estimator.__init__(self, ranking_size, logging_policy, target_policy)
+        self.name = 'NonUnif-IPS_SN-t-NonUnif'
+        self.runningDenominatorMean=0.0
+
+    def estimate(self, query, logged_ranking, new_ranking, logged_value):
+        numAllowedDocs = self.loggingPolicy.dataset.docsPerQuery[query]
+        
+        underlyingRanking = self.loggingPolicy.policy.predict(query, -1)
+        underlyingRanking_t = self.targetPolicy.policy.predict(query, -1)
+        currentDistribution = self.loggingPolicy.multinomials[numAllowedDocs]
+        targetDistribution = self.targetPolicy.multinomials[numAllowedDocs]
+
+        numRankedDocs = logged_ranking.size
+        invPropensity = 1.0
+
+        for j in range(numRankedDocs):
+            underlyingIndex = numpy.flatnonzero(underlyingRanking == logged_ranking[j])[0]
+            underlyingIndex_t = numpy.flatnonzero(underlyingRanking_t == new_ranking[j])[0]
+            invPropensity *= (targetDistribution[underlyingIndex_t] * 1.0 / currentDistribution[underlyingIndex])
+
+        currentValue = logged_value * invPropensity
+
+        self.updateRunningAverage(currentValue)
+        denominatorDelta=invPropensity-self.runningDenominatorMean
+        self.runningDenominatorMean+=denominatorDelta/self.runningSum
+        if self.runningDenominatorMean!=0.0:
+            return 1.0*self.runningMean/self.runningDenominatorMean
+        else:
+            return 0.0
+
+    def reset(self):
+        Estimator.reset(self)
+        self.runningDenominatorMean=0.0
         
 class UniformPI(Estimator):
     def __init__(self, ranking_size, logging_policy, target_policy):

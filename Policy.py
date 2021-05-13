@@ -48,7 +48,7 @@ def UniformGamma(num_candidates, ranking_size, allow_repetitions):
             currentEnd=(j+1)*num_candidates
             gamma[currentStart:currentEnd, currentStart:currentEnd]=0
             numpy.fill_diagonal(gamma, 1.0/num_candidates)
-
+    
     gammaInv=scipy.linalg.pinv(gamma)
     return (num_candidates, gammaInv)
     
@@ -99,7 +99,7 @@ def NonUniformGamma(num_candidates, decay, ranking_size, allow_repetitions):
     
     normalizer=numpy.sum(multinomial, dtype=numpy.longdouble)
     multinomial=multinomial/normalizer
-
+   
     gammaInv=scipy.linalg.pinv(gamma)
     return (num_candidates, multinomial, gammaInv)
              
@@ -413,8 +413,10 @@ class UniformPolicy(Policy):
             self.gammaRankingSize=ranking_size
             
             candidateSet=set(self.dataset.docsPerQuery)
-            
-            responses=joblib.Parallel(n_jobs=-2, verbose=50)(joblib.delayed(UniformGamma)(i, ranking_size, self.allowRepetitions) for i in candidateSet)
+            n_jobs = 8
+            responses=joblib.Parallel(n_jobs=n_jobs, verbose=50)(joblib.delayed(UniformGamma)(i, ranking_size, self.allowRepetitions) for i in candidateSet)
+                
+#             responses=joblib.Parallel(n_jobs=-2, verbose=50)(joblib.delayed(UniformGamma)(i, ranking_size, self.allowRepetitions) for i in candidateSet)
             
             for tup in responses:
                 self.gammas[tup[0]]=tup[1]
@@ -488,7 +490,8 @@ class NonUniformPolicy(Policy):
             self.gammaRankingSize=ranking_size
             
             candidateSet=set(self.dataset.docsPerQuery)
-            responses=joblib.Parallel(n_jobs=-2, verbose=50)(joblib.delayed(NonUniformGamma)(i, self.decay, ranking_size, self.allowRepetitions) for i in candidateSet)
+            n_jobs=8
+            responses=joblib.Parallel(n_jobs=n_jobs, verbose=50)(joblib.delayed(NonUniformGamma)(i, self.decay, ranking_size, self.allowRepetitions) for i in candidateSet)
             
             for tup in responses:
                 self.gammas[tup[0]]=tup[2]
@@ -666,4 +669,3 @@ if __name__=="__main__":
     print("LogLogoverlap", numpy.amax(LogLogoverlap), numpy.amin(LogLogoverlap), numpy.mean(LogLogoverlap), numpy.std(LogLogoverlap), numpy.median(LogLogoverlap), len(numpy.where(LogLogoverlap > 0.99)[0]))
     print("TargetTargettau", numpy.amax(TargetTargettau), numpy.amin(TargetTargettau), numpy.mean(TargetTargettau), numpy.std(TargetTargettau), numpy.median(TargetTargettau), len(numpy.where(TargetTargettau > 0.99)[0]))
     print("TargetTargetoverlap", numpy.amax(TargetTargetoverlap), numpy.amin(TargetTargetoverlap), numpy.mean(TargetTargetoverlap), numpy.std(TargetTargetoverlap), numpy.median(TargetTargetoverlap), len(numpy.where(TargetTargetoverlap > 0.99)[0]))
-    

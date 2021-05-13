@@ -23,10 +23,21 @@ if __name__ == "__main__":
     parser.add_argument('--temperature', '-t', metavar='T', type=float, help='Temperature for logging policy', 
                         default=0.0)        #Use 0 < temperature < 2 to have reasonable tails for logger [-t 2 => smallest prob is 10^-4 (Uniform is 10^-2)]
     
+    # logging policy is always stochastic
     parser.add_argument('--logging_ranker', '-f', metavar='F', type=str, help='Model for logging ranker', 
                         default="tree", choices=["tree", "lasso"])
     parser.add_argument('--logging_feature', '-lf', metavar='LF', type=str, help='Features for logging ranker model', 
                         default="url", choices=["All", "url", "body"])
+    
+    # evaluation policy is can be determinitic/ stochastic
+    parser.add_argument('--eval_temperature', '-et', metavar='ET', type=float, help='Temperature for logging policy', 
+                        default=-100.0)  
+    # use eval_temperature to control, evaluation policy
+#     eval_temperature = 0.0 then evaluation policy is uniform
+#     eval_temperature > 0.0 then evaluation policy is stochastic
+#     ** eval_temperature < 0.0 then evaluation policy is deterministic
+    
+    
     parser.add_argument('--evaluation_ranker', '-e', metavar='E', type=str, help='Model for evaluation ranker', 
                         default="tree", choices=["tree", "lasso"])
     parser.add_argument('--evaluation_feature', '-ef', metavar='EF', type=str, help='Features for evaluation ranker model', 
@@ -96,15 +107,32 @@ if __name__ == "__main__":
     numpy.random.seed(args.numpy_seed)
     print("Anti Optimal Target policy setting: ", args.evaluation_antioptimal)
     print("Target policy (deterministic) model:{}; Target policy features:{}".format(args.evaluation_ranker, args.evaluation_feature))
-    targetPolicy=Policy.DeterministicPolicy(data, args.evaluation_ranker,anti=args.logging_antioptimal)
-    if args.evaluation_feature == 'url':
-            targetPolicy.train(anchorURLFeatures, 'url')
-    elif args.evaluation_feature == 'body':
-        targetPolicy.train(bodyTitleDocFeatures, 'body')
-    elif args.evaluation_feature == 'All':
-            targetPolicy.train(allFeatures, 'all')
-    targetPolicy.predictAll(args.length_ranking)
     
+    if args.eval_temperature == 0.0:
+        # uniform target policy
+        print("Target policy is a uniform policy.")
+        targetPolicy=Policy.UniformPolicy(data, args.replacement)
+        targetPolicy.setupGamma(args.length_ranking)
+    else:
+        underlyingPolicy=Policy.DeterministicPolicy(data, args.evaluation_ranker, anti=args.evaluation_antioptimal)
+        if args.evaluation_feature == 'url':
+            underlyingPolicy.train(anchorURLFeatures, 'url')
+        elif args.evaluation_feature == 'body':
+            underlyingPolicy.train(bodyTitleDocFeatures, 'body')
+        elif args.evaluation_feature == 'All':
+            underlyingPolicy.train(allFeatures, 'all')
+        
+        if args.eval_temperature > 0.0:
+            print("Target policy is a stochastic policy, temperature/decay = ", args.eval_temperature)
+            # stochatics target policy
+            targetPolicy=Policy.NonUniformPolicy(underlyingPolicy, data, args.replacement, args.eval_temperature)
+            targetPolicy.setupGamma(args.length_ranking)
+            
+        elif args.eval_temperature < 0.0:
+            print("Target policy is a deterministic policy.")
+            # deterministic target policy
+            targetPolicy = underlyingPolicy
+        
     print("--------------------------Logging Policy settup --------------------------")   
     # Setup logging Policy
     loggingPolicy=None
@@ -162,14 +190,54 @@ if __name__ == "__main__":
         estimator.estimateAll()
     elif args.approach=="IPS":
         if args.temperature > 0.0:
-            estimator=Estimators.NonUniformIPS(args.length_ranking, loggingPolicy, targetPolicy)
-        else:    
-            estimator=Estimators.UniformIPS(args.length_ranking, loggingPolicy, targetPolicy)
+            # nonuniform logging
+            if args.eval_temperature ==0:
+                # uniform target
+                estimator=Estimators.NonUniformIPS_tUniform(args.length_ranking, loggingPolicy, targetPolicy)
+            elif args.eval_temperature >0:
+                # nonuniform target
+                estimator=Estimators.NonUniformIPS_tNonUniform(args.length_ranking, loggingPolicy, targetPolicy)
+            elif args.eval_temperature <0:
+                # deterministic target
+                estimator=Estimators.NonUniformIPS(args.length_ranking, loggingPolicy, targetPolicy)
+            
+        else: 
+            # uniform logging
+            if args.eval_temperature ==0:
+                # uniform target
+                estimator=Estimators.UniformIPS_tUniform(args.length_ranking, loggingPolicy, targetPolicy)
+            elif args.eval_temperature >0:
+                # nonuniform target
+                estimator=Estimators.UniformIPS_tNonUniform(args.length_ranking, loggingPolicy, targetPolicy)
+            elif args.eval_temperature <0:
+                # deterministic target
+                estimator=Estimators.UniformIPS(args.length_ranking, loggingPolicy, targetPolicy)
+                
     elif args.approach=="IPS_SN":
         if args.temperature > 0.0:
-            estimator=Estimators.NonUniformSNIPS(args.length_ranking, loggingPolicy, targetPolicy)
-        else:
-            estimator=Estimators.UniformSNIPS(args.length_ranking, loggingPolicy, targetPolicy)
+            # nonuniform logging
+            if args.eval_temperature ==0:
+                # uniform target
+                estimator=Estimators.NonUniformSNIPS_tUniform(args.length_ranking, loggingPolicy, targetPolicy)
+            elif args.eval_temperature >0:
+                # nonuniform target
+                estimator=Estimators.NonUniformSNIPS_tNonUniform(args.length_ranking, loggingPolicy, targetPolicy)
+            elif args.eval_temperature <0:
+                # deterministic target
+                estimator=Estimators.NonUniformSNIPS(args.length_ranking, loggingPolicy, targetPolicy)
+            
+        else: 
+            # uniform logging
+            if args.eval_temperature ==0:
+                # uniform target
+                estimator=Estimators.UniformSNIPS_tUniform(args.length_ranking, loggingPolicy, targetPolicy)
+            elif args.eval_temperature >0:
+                # nonuniform target
+                estimator=Estimators.UniformSNIPS_tNonUniform(args.length_ranking, loggingPolicy, targetPolicy)
+            elif args.eval_temperature <0:
+                # deterministic target
+                estimator=Estimators.UniformSNIPS(args.length_ranking, loggingPolicy, targetPolicy)
+                
     elif args.approach=="PI":
         if args.temperature > 0.0:
             estimator=Estimators.NonUniformPI(args.length_ranking, loggingPolicy, targetPolicy)
@@ -203,7 +271,8 @@ if __name__ == "__main__":
     
     
     saveValues = numpy.linspace(start=int(args.logSize/args.saveSize), stop=args.logSize, num=args.saveSize, endpoint=True, dtype=numpy.int)
-    
+    # output filename to save all the evaluation metrics
+
     outputString = args.output_dir+'ssynth_'+args.value_metric+'_'+args.dataset+'_'
     if args.max_docs is None:
         outputString += '-1_'
@@ -215,8 +284,10 @@ if __name__ == "__main__":
         outputString += 'r'
     else:
         outputString += 'n'
-    outputString += str(float(args.temperature)) + '_' 
-    outputString += 'f' + args.logging_ranker + '_e' + args.evaluation_ranker + '_' + str(args.numpy_seed)
+    outputString += str(float(args.temperature)) + '_e' + str(float(args.eval_temperature))
+    outputString += 'f' + str(args.logging_ranker) + '_' + str(args.logging_feature) + '_' + str(args.logging_antioptimal)
+    outputString += '_e' + str(args.evaluation_ranker) + '_' + str(args.evaluation_feature) + '_' + str(args.evaluation_antioptimal) + str(args.numpy_seed)
+    
     outputString += '_'+args.approach
     if args.approach.startswith("DM"):
         outputString += '_'+str(args.trainingSize)
