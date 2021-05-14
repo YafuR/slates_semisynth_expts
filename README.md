@@ -1,5 +1,5 @@
 # Off-policy evaluation for ranking in information retrieval
-Based on the work in [1], we further explore off-policy evaluation of slate recommenders/ranker.
+Based on the work in [1], we further explore off-policy evaluation of slate recommenders/ranker. The full report of this work can be found in `Writeup.pdf`.
 
 These python scripts and classes run semi-synthetic experiments on the MSLR-10K datasets
 to study off-policy estimators for the slate bandit problem (combinatorial contextual bandits).
