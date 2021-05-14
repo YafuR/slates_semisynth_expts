@@ -45,9 +45,15 @@ Refer `Datasets.py::main` for how to read in these datasets
 
 
 
-#### Result log 
+#### Result
+
+##### log files: 
 
 All result logs are saved in `log` folder.
+
+##### Experiment results:
+
+![](./figures/res1.pdf)
 
 
 
